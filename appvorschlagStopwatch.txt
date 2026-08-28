@@ -1,0 +1,273 @@
+import { createWidget, widget, event } from '@zeppos/ui'
+import { setTimer, clearTimer } from '@zeppos/device'
+
+Page({
+  state: {
+    isRunning: false,
+    startTime: 0,
+    elapsedTime: 0,
+    timerId: null,
+    laps: [],
+    lastLapTime: 0
+  },
+
+  build() {
+    const W = 432
+    const H = 514
+
+    // 1. Hintergrund
+    createWidget(widget.FILL_RECT, {
+      x: 0,
+      y: 0,
+      w: W,
+      h: H,
+      color: 0x0a0a0c
+    })
+
+    // 2. Haupt-Zeitanzeige (MM:SS)
+    this.timeMainText = createWidget(widget.TEXT, {
+      x: 30,
+      y: 40,
+      w: 240,
+      h: 70,
+      color: 0x39ff14, // Neon-Grün
+      text_size: 60,
+      align_h: 2, // Rechtsbündig
+      align_v: 1,
+      text: '00:00'
+    })
+
+    // Millisekunden / Hundertstel (.SS)
+    this.timeMsText = createWidget(widget.TEXT, {
+      x: 275,
+      y: 54,
+      w: 120,
+      h: 50,
+      color: 0x39ff14,
+      text_size: 38,
+      align_h: 0, // Linksbündig
+      align_v: 1,
+      text: '.00'
+    })
+
+    // 3. Letzte Rundenzeit (Sub-Display)
+    this.currentLapSubText = createWidget(widget.TEXT, {
+      x: 0,
+      y: 115,
+      w: W,
+      h: 30,
+      color: 0x8e8e93,
+      text_size: 20,
+      align_h: 1, // Zentriert
+      align_v: 1,
+      text: 'BEREIT'
+    })
+
+    // Trennlinie
+    createWidget(widget.FILL_RECT, {
+      x: 24,
+      y: 155,
+      w: W - 48,
+      h: 1,
+      color: 0x222228
+    })
+
+    // 4. Buttons (Reset | Start/Stop | Lap)
+    const btnY = 175
+    const btnW = 114
+    const btnH = 60
+    const btnRadius = 14
+
+    // RESET BUTTON (Links, Rot/Grau)
+    this.btnReset = createWidget(widget.BUTTON, {
+      x: 24,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      radius: btnRadius,
+      normal_color: 0x2c1d1f,
+      press_color: 0x4a2528,
+      text: 'RESET',
+      text_size: 19,
+      color: 0xff453a,
+      click_func: () => this.handleReset()
+    })
+
+    // START / STOP BUTTON (Mitte, Türkis/Rot)
+    this.btnStart = createWidget(widget.BUTTON, {
+      x: 159,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      radius: btnRadius,
+      normal_color: 0x30d158,
+      press_color: 0x249641,
+      text: 'START',
+      text_size: 20,
+      color: 0x000000,
+      click_func: () => this.handleStartStop()
+    })
+
+    // LAP BUTTON (Rechts, Blau)
+    this.btnLap = createWidget(widget.BUTTON, {
+      x: 294,
+      y: btnY,
+      w: btnW,
+      h: btnH,
+      radius: btnRadius,
+      normal_color: 0x1c2b3a,
+      press_color: 0x263f57,
+      text: 'LAP',
+      text_size: 19,
+      color: 0x0a84ff,
+      click_func: () => this.handleLap()
+    })
+
+    // 5. Rundenliste (Zeigt die letzten 4 Runden an)
+    this.lapRows = []
+    const listStartY = 255
+    const rowHeight = 55
+
+    for (let i = 0; i < 4; i++) {
+      const y = listStartY + i * rowHeight
+
+      // Hintergrundzeile
+      createWidget(widget.FILL_RECT, {
+        x: 24,
+        y: y,
+        w: W - 48,
+        h: rowHeight - 6,
+        radius: 8,
+        color: 0x151518
+      })
+
+      const lapNumber = createWidget(widget.TEXT, {
+        x: 40,
+        y: y,
+        w: 80,
+        h: rowHeight - 6,
+        color: 0x8e8e93,
+        text_size: 18,
+        align_h: 0,
+        align_v: 1,
+        text: ''
+      })
+
+      const lapTime = createWidget(widget.TEXT, {
+        x: W - 180,
+        y: y,
+        w: 140,
+        h: rowHeight - 6,
+        color: 0xffffff,
+        text_size: 18,
+        align_h: 2,
+        align_v: 1,
+        text: ''
+      })
+
+      this.lapRows.push({ lapNumber, lapTime })
+    }
+  },
+
+  formatTime(ms) {
+    const totalSec = Math.floor(ms / 1000)
+    const m = Math.floor(totalSec / 60)
+    const s = totalSec % 60
+    const hundredths = Math.floor((ms % 1000) / 10)
+
+    const mm = m < 10 ? '0' + m : '' + m
+    const ss = s < 10 ? '0' + s : '' + s
+    const hh = hundredths < 10 ? '0' + hundredths : '' + hundredths
+
+    return { main: `${mm}:${ss}`, ms: `.${hh}`, full: `${mm}:${ss}.${hh}` }
+  },
+
+  handleStartStop() {
+    if (!this.state.isRunning) {
+      // START
+      this.state.isRunning = true
+      this.state.startTime = Date.now() - this.state.elapsedTime
+
+      this.state.timerId = setTimer(() => {
+        this.state.elapsedTime = Date.now() - this.state.startTime
+        const t = this.formatTime(this.state.elapsedTime)
+        this.timeMainText.setProperty(widget.TEXT, t.main)
+        this.timeMsText.setProperty(widget.TEXT, t.ms)
+      }, 0, 40)
+
+      this.btnStart.setProperty(widget.TEXT, 'STOP')
+      this.btnStart.setProperty(widget.NORMAL_COLOR, 0xff453a)
+      this.btnStart.setProperty(widget.COLOR, 0xffffff)
+    } else {
+      // STOP
+      this.state.isRunning = false
+      if (this.state.timerId) {
+        clearTimer(this.state.timerId)
+        this.state.timerId = null
+      }
+
+      this.btnStart.setProperty(widget.TEXT, 'START')
+      this.btnStart.setProperty(widget.NORMAL_COLOR, 0x30d158)
+      this.btnStart.setProperty(widget.COLOR, 0x000000)
+    }
+  },
+
+  handleLap() {
+    if (!this.state.isRunning) return
+
+    const currentTotal = this.state.elapsedTime
+    const lapDuration = currentTotal - this.state.lastLapTime
+    this.state.lastLapTime = currentTotal
+
+    const lapNum = this.state.laps.length + 1
+    const lapData = {
+      num: lapNum,
+      split: this.formatTime(lapDuration).full
+    }
+
+    this.state.laps.unshift(lapData)
+
+    // Sub-Display aktualisieren
+    this.currentLapSubText.setProperty(
+      widget.TEXT,
+      `LAP ${lapNum} / +${lapData.split}`
+    )
+
+    // Rundenliste aktualisieren
+    for (let i = 0; i < this.lapRows.length; i++) {
+      if (this.state.laps[i]) {
+        this.lapRows[i].lapNumber.setProperty(
+          widget.TEXT,
+          `Lap ${this.state.laps[i].num}`
+        )
+        this.lapRows[i].lapTime.setProperty(
+          widget.TEXT,
+          this.state.laps[i].split
+        )
+      }
+    }
+  },
+
+  handleReset() {
+    if (this.state.isRunning) return
+
+    this.state.elapsedTime = 0
+    this.state.lastLapTime = 0
+    this.state.laps = []
+
+    this.timeMainText.setProperty(widget.TEXT, '00:00')
+    this.timeMsText.setProperty(widget.TEXT, '.00')
+    this.currentLapSubText.setProperty(widget.TEXT, 'BEREIT')
+
+    for (let i = 0; i < this.lapRows.length; i++) {
+      this.lapRows[i].lapNumber.setProperty(widget.TEXT, '')
+      this.lapRows[i].lapTime.setProperty(widget.TEXT, '')
+    }
+  },
+
+  onDestroy() {
+    if (this.state.timerId) {
+      clearTimer(this.state.timerId)
+    }
+  }
+})
